@@ -8,7 +8,9 @@ services:
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - xpack.security.enrollment.enabled
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
     volumes:
       - es-data:/usr/share/elasticsearch/data
       - es-plugins:/usr/share/elasticsearch/plugins
