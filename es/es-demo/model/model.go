@@ -1,4 +1,4 @@
-package main
+package model
 
 // TbHotel undefined
 type TbHotel struct {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"esdemo/model"
 	"fmt"
 	"github.com/elastic/go-elasticsearch/v9"
 	"github.com/elastic/go-elasticsearch/v9/typedapi/core/search"
@@ -32,6 +33,21 @@ func init() {
 	})
 	dsn := "root:123456@tcp(127.0.0.1:15887)/es?charset=utf8mb4&parseTime=True&loc=Local"
 	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+}
+
+func TestName(t *testing.T) {
+	var a any = "test"
+
+	b := a.(int)
+	fmt.Println(b)
+}
+
+func TestInfo(t *testing.T) {
+	es, _ := elasticsearch.NewTypedClient(elasticsearch.Config{
+		Addresses: []string{"http://localhost:9200"},
+	})
+	defer es.Close(context.Background())
+	log.Println(es.Info().Do(context.Background()))
 }
 
 func TestCreateIndex(t *testing.T) {
@@ -117,12 +133,12 @@ func a[b any]() (b, error) {
 	return e, err
 }
 
-func GetById(ctx context.Context, id int) (*TbHotel, error) {
-	return gorm.G[*TbHotel](db).Where("id = ?", id).First(ctx)
+func GetById(ctx context.Context, id int) (*model.TbHotel, error) {
+	return gorm.G[*model.TbHotel](db).Where("id = ?", id).First(ctx)
 }
 
-func GetAll(ctx context.Context) ([]*TbHotel, error) {
-	return gorm.G[*TbHotel](db).Find(ctx)
+func GetAll(ctx context.Context) ([]*model.TbHotel, error) {
+	return gorm.G[*model.TbHotel](db).Find(ctx)
 }
 
 func TestAddDoc(t *testing.T) {
@@ -131,7 +147,7 @@ func TestAddDoc(t *testing.T) {
 	ctx := context.Background()
 	hotel, err := GetById(ctx, 36934)
 	fmt.Println(hotel, err)
-	hotelDoc := NewTbHotelDoc(hotel)
+	hotelDoc := model.NewTbHotelDoc(hotel)
 	rsp, err := es.Index("hotel").
 		Id("36934").
 		Request(hotelDoc).
@@ -160,7 +176,7 @@ func TestBatchImport(t *testing.T) {
 	var buf bytes.Buffer
 	for _, item := range list {
 		meta := []byte(fmt.Sprintf(`{ "index" : { "_id" : "%d" } }%s`, item.ID, "\n"))
-		data, err := json.Marshal(NewTbHotelDoc(item))
+		data, err := json.Marshal(model.NewTbHotelDoc(item))
 		if err != nil {
 			log.Fatalf("Cannot encode article %d: %s", item.ID, err)
 		}
@@ -423,6 +439,67 @@ func TestHighlight(t *testing.T) {
 	fmt.Println(rsp, err)
 
 	handleResponse(t, rsp, err)
+}
+
+func TestAggs(t *testing.T) {
+	ctx := context.Background()
+	size := 100
+	f := "brand"
+	rsp, err := es.Search().
+		Index("hotel").
+		Size(0).
+		Aggregations(map[string]types.Aggregations{
+			"brandAgg": {
+				Terms: &types.TermsAggregation{
+					Field: &f,
+					Size:  &size,
+					Order: map[string]sortorder.SortOrder{
+						"_count": sortorder.Asc,
+					},
+				},
+			},
+		}).Do(ctx)
+
+	assert.NoError(t, err)
+	for _, item := range rsp.Aggregations {
+		s, _ := item.(*types.StringTermsAggregate)
+		terms, _ := s.Buckets.([]types.StringTermsBucket)
+		for _, term := range terms {
+			fmt.Println(term.Key, term.DocCount)
+		}
+	}
+}
+
+func TestSuggest(t *testing.T) {
+	ctx := context.Background()
+	text := ""
+	b := true
+	s := 10
+	rsp, err := es.Search().
+		Index("hotel").
+		Size(0).
+		Suggest(&types.Suggester{
+			Suggesters: map[string]types.FieldSuggester{
+				"my_suggest": {
+					Completion: &types.CompletionSuggester{
+						Field:          "suggestion",
+						SkipDuplicates: &b,
+						Size:           &s,
+					},
+				},
+			},
+			Text: &text,
+		}).Do(ctx)
+
+	assert.NoError(t, err)
+	for _, item := range rsp.Suggest {
+		for _, item2 := range item {
+			s2, _ := item2.(*types.CompletionSuggest)
+			for _, option := range s2.Options {
+				fmt.Println(option.Text)
+			}
+		}
+	}
 }
 
 func handleResponse(t *testing.T, rsp *search.Response, err error) {
